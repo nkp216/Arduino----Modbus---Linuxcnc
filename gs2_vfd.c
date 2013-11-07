@@ -138,6 +138,11 @@ int read_data(modbus_param_t *param, slavedata_t *slavedata, haldata_t *hal_data
 		Reg1val=Reg1val>>1;
 		x++; 
 		}
+		/*for(x=0;x<16;x++){
+(Reg1val & 0x01) ? (mass2[x] = 1) : (mass2[x] = 0) ;
+Reg1val=Reg1val>>1;
+}
+*/
 	*(hal_data_block->Din20)   = mass2[0];		
 	*(hal_data_block->Din21)   = mass2[1];		
 	*(hal_data_block->Din22)   = mass2[2];
