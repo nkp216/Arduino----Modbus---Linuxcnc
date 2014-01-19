@@ -94,22 +94,22 @@ typedef struct {
   hal_bit_t *Din214;
   hal_bit_t *Din215;
   
-  hal_bit_t *Din40;
-  hal_bit_t *Din41;
-  hal_bit_t *Din42;
-  hal_bit_t *Din43;
-  hal_bit_t *Din44;
-  hal_bit_t *Din45;
-  hal_bit_t *Din46;
-  hal_bit_t *Din47;
-  hal_bit_t *Din48;
-  hal_bit_t *Din49;
-  hal_bit_t *Din410;
-  hal_bit_t *Din411;
-  hal_bit_t *Din412;
-  hal_bit_t *Din413;
-  hal_bit_t *Din414;
-  hal_bit_t *Din415;
+  hal_s32_t *Din40;
+  hal_s32_t *Din41;
+  hal_s32_t *Din42;
+  hal_s32_t *Din43;
+  hal_s32_t *Din44;
+  hal_s32_t *Din45;
+  hal_s32_t *Din46;
+  hal_s32_t *Din47;
+  hal_s32_t *Din48;
+  hal_s32_t *Din49;
+  hal_s32_t *Din410;
+  hal_s32_t *Din411;
+  hal_s32_t *Din412;
+  hal_s32_t *Din413;
+  hal_s32_t *Din414;
+  hal_s32_t *Din415;
   
   hal_bit_t *Din30;
   hal_bit_t *Din31;
@@ -218,43 +218,34 @@ int read_data(modbus_param_t *param, slavedata_t *slavedata, haldata_t *hal_data
         hal_data_block->retval = retval;
         retval = -1;
     }    
-    //----------------------------------------------------------------------------------------читаем  цифровые входы --------регистр4
-        retval = read_holding_registers(param, slavedata->slave, 4 , 1 , receive_data);         
-        if (retval==1) {
+    //----------------------------------------------------------------------------------------читаем  аналоговые входы --------регистр4
+    retval = read_holding_registers(param, slavedata->slave, slavedata->read_reg_start,
+                                slavedata->read_reg_count, receive_data);    
+    if (retval==slavedata->read_reg_count) {
         retval = 0;
         hal_data_block->retval = retval;
         if (retval==0) {
-        Reg4val  = receive_data[0] ;
-        x = 0;
-        while ( x < 16  ){
-		if ((Reg4val & 0x01) == 1 ) 
-			mass4[x] = 1;
-		else
-			mass4[x] = 0;
-		Reg4val=Reg4val>>1;
-		x++; 
-		}
-	*(hal_data_block->Din40)   = mass4[0];		
-	*(hal_data_block->Din41)   = mass4[1];		
-	*(hal_data_block->Din42)   = mass4[2];
-	*(hal_data_block->Din43)   = mass4[3];
-	*(hal_data_block->Din44)   = mass4[4];
-	*(hal_data_block->Din45)   = mass4[5];
-	*(hal_data_block->Din46)   = mass4[6];
-	*(hal_data_block->Din47)   = mass4[7];
-	*(hal_data_block->Din48)   = mass4[8];
-	*(hal_data_block->Din49)   = mass4[9];
-	*(hal_data_block->Din410)  = mass4[10];
-	*(hal_data_block->Din411)  = mass4[11];
-	*(hal_data_block->Din412)  = mass4[12];
-	*(hal_data_block->Din413)  = mass4[13];
-	*(hal_data_block->Din414)  = mass4[14];
-	*(hal_data_block->Din415)  = mass4[15];                                         
+        *(hal_data_block->Din40)  = receive_data[0] ;
+        *(hal_data_block->Din41)  = receive_data[1] ;
+        *(hal_data_block->Din42)  = receive_data[2] ;
+        *(hal_data_block->Din43)  = receive_data[3] ;        
+        *(hal_data_block->Din44)  = receive_data[4] ;
+        *(hal_data_block->Din45)  = receive_data[5] ;
+        *(hal_data_block->Din46)  = receive_data[6] ;
+        *(hal_data_block->Din47)  = receive_data[7] ;
+        *(hal_data_block->Din48)  = receive_data[8] ;
+        *(hal_data_block->Din49)  = receive_data[9] ;
+        *(hal_data_block->Din410) = receive_data[10];
+        *(hal_data_block->Din411) = receive_data[11];
+        *(hal_data_block->Din412) = receive_data[12];
+        *(hal_data_block->Din413) = receive_data[13];
+        *(hal_data_block->Din414) = receive_data[14];
+        *(hal_data_block->Din415) = receive_data[15];        
         retval = 0;
         }
-    }
-    else {
+    } else {
         hal_data_block->retval = retval;
+  
         retval = -1;
     }
     //----------------------------------------------------------------------------------------читаем  цифровые входы --------регистр2       
@@ -442,22 +433,23 @@ int main(int argc, char **argv)
     retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din33),    hal_comp_id, "%s.Din3-03" , modname); if (retval!=0) goto out_closeHAL; 
     retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din34),    hal_comp_id, "%s.Din3-04" , modname); if (retval!=0) goto out_closeHAL;
     
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din40),    hal_comp_id, "%s.Din4-00" , modname); if (retval!=0) goto out_closeHAL;   
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din41),    hal_comp_id, "%s.Din4-01" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din42),    hal_comp_id, "%s.Din4-02" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din43),    hal_comp_id, "%s.Din4-03" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din44),    hal_comp_id, "%s.Din4-04" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din45),    hal_comp_id, "%s.Din4-05" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din46),    hal_comp_id, "%s.Din4-06" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din47),    hal_comp_id, "%s.Din4-07" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din48),    hal_comp_id, "%s.Din4-08" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din49),    hal_comp_id, "%s.Din4-09" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din410),   hal_comp_id, "%s.Din4-10", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din411),   hal_comp_id, "%s.Din4-11", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din412),   hal_comp_id, "%s.Din4-12", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din413),   hal_comp_id, "%s.Din4-13", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din414),   hal_comp_id, "%s.Din4-14", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din415),   hal_comp_id, "%s.Din4-15", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din40),    hal_comp_id, "%s.Din4-00" , modname); if (retval!=0) goto out_closeHAL;   
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din41),    hal_comp_id, "%s.Din4-01" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din42),    hal_comp_id, "%s.Din4-02" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din43),    hal_comp_id, "%s.Din4-03" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din44),    hal_comp_id, "%s.Din4-04" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din45),    hal_comp_id, "%s.Din4-05" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din46),    hal_comp_id, "%s.Din4-06" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din47),    hal_comp_id, "%s.Din4-07" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din48),    hal_comp_id, "%s.Din4-08" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din49),    hal_comp_id, "%s.Din4-09" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din410),   hal_comp_id, "%s.Din4-10", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din411),   hal_comp_id, "%s.Din4-11", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din412),   hal_comp_id, "%s.Din4-12", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din413),   hal_comp_id, "%s.Din4-13", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din414),   hal_comp_id, "%s.Din4-14", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din415),   hal_comp_id, "%s.Din4-15", modname); if (retval!=0) goto out_closeHAL;
+    
     
     *(haldata->Din00)  = 0;    
     *(haldata->Din01)  = 0; 
