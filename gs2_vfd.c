@@ -117,11 +117,82 @@ typedef struct {
   hal_bit_t *Din33;
   hal_bit_t *Din34;
 } haldata_t;
-static  int regarg[4];
 static int done;
 char *modname = "arduino";
+
+static struct option long_options[] = {
+    {"bits", 1, 0, 'b'},
+    {"device", 1, 0, 'd'},
+    {"debug", 0, 0, 'g'},
+    {"help", 0, 0, 'h'},
+    {"name", 1, 0, 'n'},
+    {"parity", 1, 0, 'p'},
+    {"rate", 1, 0, 'r'},
+    {"stopbits", 1, 0, 's'},
+    {"target", 1, 0, 't'},
+    {"verbose", 0, 0, 'v'},
+    {0,0,0,0}
+};
+
+static char *option_string = "b:d:hn:p:r:s:t:v";
+
+static char *bitstrings[] = {"5", "6", "7", "8", NULL};
+static char *paritystrings[] = {"even", "odd", "none", NULL};
+static char *ratestrings[] = {"110", "300", "600", "1200", "2400", "4800", "9600",
+    "19200", "38400", "57600", "115200", NULL};
+static char *stopstrings[] = {"1", "2", NULL};
+
 static void quit(int sig) {
     done = 1;
+}
+
+static int comm_delay = 0; // JET delay counter for at-speed
+
+int match_string(char *string, char **matches) {
+    int len, which, match;
+    which=0;
+    match=-1;
+    if ((matches==NULL) || (string==NULL)) return -1;
+    len = strlen(string);
+    while (matches[which] != NULL) {
+        if ((!strncmp(string, matches[which], len)) && (len <= strlen(matches[which]))) {
+            if (match>=0) return -1;        // multiple matches
+            match=which;
+        }
+        ++which;
+    }
+    return match;
+}
+void usage(int argc, char **argv) {
+    printf("Usage:  %s [options]\n", argv[0]);
+    printf(
+    "This is a userspace HAL program, typically loaded using the halcmd \"loadusr\" command:\n"
+    "    loadusr gs2_vfd\n"
+    "There are several command-line options.  Options that have a set list of possible values may\n"
+    "    be set by using any number of characters that are unique.  For example, --rate 5 will use\n"
+    "    a baud rate of 57600, since no other available baud rates start with \"5\"\n"
+    "-b or --bits <n> (default 8)\n"
+    "    Set number of data bits to <n>, where n must be from 5 to 8 inclusive\n"
+    "-d or --device <path> (default /dev/ttyS0)\n"
+    "    Set the name of the serial device node to use\n"
+    "-g or --debug\n"
+    "    Turn on debugging messages.  This will also set the verbose flag.  Debug mode will cause\n"
+    "    all modbus messages to be printed in hex on the terminal.\n"
+    "-n or --name <string> (default gs2_vfd)\n"
+    "    Set the name of the HAL module.  The HAL comp name will be set to <string>, and all pin\n"
+    "    and parameter names will begin with <string>.\n"
+    "-p or --parity {even,odd,none} (defalt odd)\n"
+    "    Set serial parity to even, odd, or none.\n"
+    "-r or --rate <n> (default 38400)\n"
+    "    Set baud rate to <n>.  It is an error if the rate is not one of the following:\n"
+    "    110, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200\n"
+    "-s or --stopbits {1,2} (default 1)\n"
+    "    Set serial stop bits to 1 or 2\n"
+    "-t or --target <n> (default 1)\n"
+    "    Set MODBUS target (slave) number.  This must match the device number you set on the GS2.\n"
+    "-v or --verbose\n"
+    "    Turn on debug messages.  Note that if there are serial errors, this may become annoying.\n"
+    "    At the moment, it doesn't make much difference most of the time.\n");
 }
 int read_data(modbus_param_t *param, slavedata_t *slavedata, haldata_t *hal_data_block) {
     int receive_data[MAX_READ_HOLD_REGS];	
@@ -130,8 +201,8 @@ int read_data(modbus_param_t *param, slavedata_t *slavedata, haldata_t *hal_data
     int Reg1val=0;
     int Reg2val=0;
     int Reg3val=0;
-    int Reg4val=0;
-    int mass0[16],mass1[16],mass2[16],mass3[5],mass4[16];
+    //int Reg4val=0;
+    int mass0[16],mass1[16],mass2[16],mass3[5];
     int x = 0;
 
     if (hal_data_block == NULL)
@@ -327,9 +398,10 @@ int main(int argc, char **argv)
     int hal_comp_id;
     struct timespec loop_timespec, remaining;
     int baud, bits, stopbits, debug, verbose;
-    char *device, *parity ;
-    char *regset ;
-    int i , rt;
+    char *device, *parity, *endarg;
+    int opt;
+    int argindex, argvalue;
+
     
     done = 0;
     baud = 19200;
@@ -346,23 +418,105 @@ int main(int argc, char **argv)
     slavedata.write_reg_start = START_REGISTER_W;
     slavedata.write_reg_count = NUM_REGISTERS_R;
 
+
+
+    
+        // process command line options
+    while ((opt=getopt_long(argc, argv, option_string, long_options, NULL)) != -1) {
+        switch(opt) {
+            case 'b':   // serial data bits, probably should be 8 (and defaults to 8)
+                argindex=match_string(optarg, bitstrings);
+                if (argindex<0) {
+                
+                    printf("gs2_vfd: ERROR: invalid number of bits: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                bits = atoi(bitstrings[argindex]);
+                break;
+            case 'd':   // device name, default /dev/ttyS0
+                // could check the device name here, but we'll leave it to the library open
+                if (strlen(optarg) > FILENAME_MAX) {
+                    printf("gs2_vfd: ERROR: device node name is too long: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                device = strdup(optarg);
+                break;
+            case 'g':
+                debug = 1;
+                verbose = 1;
+                break;
+            case 'n':   // module base name
+                if (strlen(optarg) > HAL_NAME_LEN-20) {
+                    printf("gs2_vfd: ERROR: HAL module name too long: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                modname = strdup(optarg);
+                break;
+            case 'p':   // parity, should be a string like "even", "odd", or "none"
+                argindex=match_string(optarg, paritystrings);
+                if (argindex<0) {
+                    printf("gs2_vfd: ERROR: invalid parity: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                parity = paritystrings[argindex];
+                break;
+            case 'r':   // Baud rate, 38400 default
+                argindex=match_string(optarg, ratestrings);
+                if (argindex<0) {
+                    printf("gs2_vfd: ERROR: invalid baud rate: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                baud = atoi(ratestrings[argindex]);
+                break;
+            case 's':   // stop bits, defaults to 1
+                argindex=match_string(optarg, stopstrings);
+                if (argindex<0) {
+                    printf("gs2_vfd: ERROR: invalid number of stop bits: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                stopbits = atoi(stopstrings[argindex]);
+                break;
+            case 't':   // target number (MODBUS ID), default 1
+                argvalue = strtol(optarg, &endarg, 10);
+                if ((*endarg != '\0') || (argvalue < 1) || (argvalue > 254)) {
+                    printf("gs2_vfd: ERROR: invalid slave number: %s\n", optarg);
+                    retval = -1;
+                    goto out_noclose;
+                }
+                slavedata.slave = argvalue;
+                break;
+            case 'v':   // verbose mode (print modbus errors and other information), default 0
+                verbose = 1;
+                break;
+            case 'h':
+            default:
+                usage(argc, argv);
+                exit(0);
+                break;
+        }
+    }
+    printf("%s: device='%s', baud=%d, bits=%d, parity='%s', stopbits=%d, address=%d, verbose=%d\n",
+           modname, device, baud, bits, parity, stopbits, slavedata.slave, debug);
+    /* point TERM and INT signals at our quit function */
+    /* if a signal is received between here and the main loop, it should prevent
+            some initialization from happening */
     signal(SIGINT, quit);
     signal(SIGTERM, quit);
-
-    getopt(argc,argv,"v:");
-	regset = optarg; 	
-    rt = atoi(regset);
-    for(i = 0;i < 4;i++){
-	regarg[i] = rt & 0x01;
-	rt = rt >> 1;
-	}
-
+    
     modbus_init_rtu(&mb_param, device, baud, parity, bits, stopbits, verbose);
+
     mb_param.debug = debug;
     if (((retval = modbus_connect(&mb_param))!=0) || done) {
         printf("%s: ERROR: couldn't open serial device\n", modname);
         goto out_noclose;
     }
+
     hal_comp_id = hal_init(modname);
     if ((hal_comp_id < 0) || done) {
         printf("%s: ERROR: hal_init failed\n", modname);
@@ -376,62 +530,62 @@ int main(int argc, char **argv)
         goto out_close;
     }
 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din00),    hal_comp_id, "%s.Din0-00" , modname); if (retval!=0) goto out_closeHAL;   
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din01),    hal_comp_id, "%s.Din0-01" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din02),    hal_comp_id, "%s.Din0-02" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din03),    hal_comp_id, "%s.Din0-03" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din04),    hal_comp_id, "%s.Din0-04" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din05),    hal_comp_id, "%s.Din0-05" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din06),    hal_comp_id, "%s.Din0-06" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din07),    hal_comp_id, "%s.Din0-07" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din08),    hal_comp_id, "%s.Din0-08" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din09),    hal_comp_id, "%s.Din0-09" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din010),   hal_comp_id, "%s.Din0-10", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din011),   hal_comp_id, "%s.Din0-11", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din012),   hal_comp_id, "%s.Din0-12", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din013),   hal_comp_id, "%s.Din0-13", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din014),   hal_comp_id, "%s.Din0-14", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din015),   hal_comp_id, "%s.Din0-15", modname); if (retval!=0) goto out_closeHAL;    
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din00),    hal_comp_id, "%s.Din0-00" , modname); if (retval!=0) goto out_closeHAL;   
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din01),    hal_comp_id, "%s.Din0-01" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din02),    hal_comp_id, "%s.Din0-02" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din03),    hal_comp_id, "%s.Din0-03" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din04),    hal_comp_id, "%s.Din0-04" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din05),    hal_comp_id, "%s.Din0-05" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din06),    hal_comp_id, "%s.Din0-06" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din07),    hal_comp_id, "%s.Din0-07" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din08),    hal_comp_id, "%s.Din0-08" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din09),    hal_comp_id, "%s.Din0-09" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din010),   hal_comp_id, "%s.Din0-10", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din011),   hal_comp_id, "%s.Din0-11", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din012),   hal_comp_id, "%s.Din0-12", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din013),   hal_comp_id, "%s.Din0-13", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din014),   hal_comp_id, "%s.Din0-14", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din015),   hal_comp_id, "%s.Din0-15", modname); if (retval!=0) goto out_closeHAL;    
     
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din10),    hal_comp_id, "%s.Din1-00" , modname); if (retval!=0) goto out_closeHAL;   
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din11),    hal_comp_id, "%s.Din1-01" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din12),    hal_comp_id, "%s.Din1-02" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din13),    hal_comp_id, "%s.Din1-03" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din14),    hal_comp_id, "%s.Din1-04" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din15),    hal_comp_id, "%s.Din1-05" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din16),    hal_comp_id, "%s.Din1-06" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din17),    hal_comp_id, "%s.Din1-07" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din18),    hal_comp_id, "%s.Din1-08" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din19),    hal_comp_id, "%s.Din1-09" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din110),   hal_comp_id, "%s.Din1-10", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din111),   hal_comp_id, "%s.Din1-11", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din112),   hal_comp_id, "%s.Din1-12", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din113),   hal_comp_id, "%s.Din1-13", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din114),   hal_comp_id, "%s.Din1-14", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din115),   hal_comp_id, "%s.Din1-15", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din10),    hal_comp_id, "%s.Din1-00" , modname); if (retval!=0) goto out_closeHAL;   
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din11),    hal_comp_id, "%s.Din1-01" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din12),    hal_comp_id, "%s.Din1-02" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din13),    hal_comp_id, "%s.Din1-03" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din14),    hal_comp_id, "%s.Din1-04" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din15),    hal_comp_id, "%s.Din1-05" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din16),    hal_comp_id, "%s.Din1-06" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din17),    hal_comp_id, "%s.Din1-07" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din18),    hal_comp_id, "%s.Din1-08" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din19),    hal_comp_id, "%s.Din1-09" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din110),   hal_comp_id, "%s.Din1-10", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din111),   hal_comp_id, "%s.Din1-11", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din112),   hal_comp_id, "%s.Din1-12", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din113),   hal_comp_id, "%s.Din1-13", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din114),   hal_comp_id, "%s.Din1-14", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din115),   hal_comp_id, "%s.Din1-15", modname); if (retval!=0) goto out_closeHAL;
 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din20),    hal_comp_id, "%s.Din2-00" , modname); if (retval!=0) goto out_closeHAL;   
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din21),    hal_comp_id, "%s.Din2-01" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din22),    hal_comp_id, "%s.Din2-02" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din23),    hal_comp_id, "%s.Din2-03" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din24),    hal_comp_id, "%s.Din2-04" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din25),    hal_comp_id, "%s.Din2-05" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din26),    hal_comp_id, "%s.Din2-06" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din27),    hal_comp_id, "%s.Din2-07" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din28),    hal_comp_id, "%s.Din2-08" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din29),    hal_comp_id, "%s.Din2-09" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din210),   hal_comp_id, "%s.Din2-10", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din211),   hal_comp_id, "%s.Din2-11", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din212),   hal_comp_id, "%s.Din2-12", modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din213),   hal_comp_id, "%s.Din2-13", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din214),   hal_comp_id, "%s.Din2-14", modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din215),   hal_comp_id, "%s.Din2-15", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din20),    hal_comp_id, "%s.Din2-00" , modname); if (retval!=0) goto out_closeHAL;   
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din21),    hal_comp_id, "%s.Din2-01" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din22),    hal_comp_id, "%s.Din2-02" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din23),    hal_comp_id, "%s.Din2-03" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din24),    hal_comp_id, "%s.Din2-04" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din25),    hal_comp_id, "%s.Din2-05" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din26),    hal_comp_id, "%s.Din2-06" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din27),    hal_comp_id, "%s.Din2-07" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din28),    hal_comp_id, "%s.Din2-08" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din29),    hal_comp_id, "%s.Din2-09" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din210),   hal_comp_id, "%s.Din2-10", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din211),   hal_comp_id, "%s.Din2-11", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din212),   hal_comp_id, "%s.Din2-12", modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din213),   hal_comp_id, "%s.Din2-13", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din214),   hal_comp_id, "%s.Din2-14", modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din215),   hal_comp_id, "%s.Din2-15", modname); if (retval!=0) goto out_closeHAL;
 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din30),    hal_comp_id, "%s.Din3-00" , modname); if (retval!=0) goto out_closeHAL;    
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din31),    hal_comp_id, "%s.Din3-01" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din32),    hal_comp_id, "%s.Din3-02" , modname); if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din33),    hal_comp_id, "%s.Din3-03" , modname); if (retval!=0) goto out_closeHAL; 
-    retval = hal_pin_bit_newf(HAL_IN, &(haldata->Din34),    hal_comp_id, "%s.Din3-04" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din30),    hal_comp_id, "%s.Din3-00" , modname); if (retval!=0) goto out_closeHAL;    
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din31),    hal_comp_id, "%s.Din3-01" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din32),    hal_comp_id, "%s.Din3-02" , modname); if (retval!=0) goto out_closeHAL;
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din33),    hal_comp_id, "%s.Din3-03" , modname); if (retval!=0) goto out_closeHAL; 
+    retval = hal_pin_bit_newf(HAL_OUT, &(haldata->Din34),    hal_comp_id, "%s.Din3-04" , modname); if (retval!=0) goto out_closeHAL;
     
     retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din40),    hal_comp_id, "%s.Din4-00" , modname); if (retval!=0) goto out_closeHAL;   
     retval = hal_pin_s32_newf(HAL_OUT, &(haldata->Din41),    hal_comp_id, "%s.Din4-01" , modname); if (retval!=0) goto out_closeHAL; 
